@@ -1,0 +1,8 @@
+kafka:
+  brokers: 
+    - 10.158.9.201:9092
+    - 10.158.9.200:9092
+
+server:
+  listenPort: 8081
+

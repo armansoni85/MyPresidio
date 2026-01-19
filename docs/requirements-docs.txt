@@ -1,0 +1,10 @@
+mkdocs
+mkdocs-material
+mknotebooks
+pymdown-extensions
+markdown
+mkdocstrings-python
+presidio_analyzer
+presidio_anonymizer
+presidio_image_redactor
+pygments>=2.10

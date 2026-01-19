@@ -1,0 +1,1 @@
+cache_enabled = True  # Set to True or False to enable or disable caching
