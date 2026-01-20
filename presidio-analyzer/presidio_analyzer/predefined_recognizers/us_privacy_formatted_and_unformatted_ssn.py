@@ -81,8 +81,12 @@ class SSN_Formatted_Unformatted_Recognizer(PatternRecognizer):
             validity = self.validate_ssn(pattern_text)
             has_context = self._has_context(text, result.start, result.end)
 
+
             # Adjust score based on validation and context
             adjusted_score = self._calculate_adjusted_score(result.score, validity, has_context)
+
+            if validity == "valid" and not has_context:
+                adjusted_score = 0.1
 
             # Create enhanced result
             enhanced_result = RecognizerResult(
@@ -109,7 +113,10 @@ class SSN_Formatted_Unformatted_Recognizer(PatternRecognizer):
         context_end = min(len(text), end + window_size)
         context_window = text[context_start:context_end].lower()
 
-        return any(context_word.lower() in context_window for context_word in self.CONTEXT)
+        for word in self.CONTEXT:
+            if re.search(rf"\b{re.escape(word)}\b", context_window):
+                return True
+        return False
 
     def validate_ssn(self, ssn: str) -> str:
         """
@@ -169,4 +176,5 @@ class SSN_Formatted_Unformatted_Recognizer(PatternRecognizer):
         if has_context:
             return 1.0
 
-        return 0.5
+        if validity == "valid" and not has_context:
+            return 0.5
