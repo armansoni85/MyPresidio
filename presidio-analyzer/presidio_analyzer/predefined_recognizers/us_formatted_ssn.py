@@ -14,8 +14,8 @@ class US_Formatted_SSN_Recognizer(PatternRecognizer):
     PATTERNS = [
         Pattern(
             name="formatted_ssn",
-            regex = r"""(?<![!@#$%&*()_+|`\\\/;"'<>\?~A-Za-z0-9])(?:^|[=:\[\{\- ])\d{3}[- ]\d{2}[- ]\d{4}(?=$|[.\]\}, ])""",
-            score=0.7,  # base score (no context)
+            regex = r"""(?:^|[=:\[\{\-\s])\d{3}[- ]\d{2}[- ]\d{4}(?=$|[.\]\},\s])""",
+            score=0.5,  # base score (no context)
         )
     ]
 
@@ -56,7 +56,7 @@ class US_Formatted_SSN_Recognizer(PatternRecognizer):
                 continue
 
             # Default: valid SSN, no context
-            r.score = 0.7
+            r.score = 0.5
 
             # Boost score if context exists
             if self._has_backward_context(text, r.start):

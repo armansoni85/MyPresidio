@@ -20,22 +20,21 @@ class SSN_Formatted_Unformatted_Recognizer(PatternRecognizer):
     PATTERNS = [
         Pattern(
             "SSN formatted with hyphen",
-            r"(?<![!@#$%&*()_+|`\\\/;\"'<>\?~A-Za-z0-9])(?:^|[=:\[\{\- ])\d{3}-\d{2}-\d{4}(?=$|[.\]\}, ])",
-            0.85,
-    ),
+            r"(?:^|[=:\[\{\-\s])\d{3}-\d{2}-\d{4}(?=$|[.\]\},\s])",
+            0.5,
+        ),
 
         Pattern(
             "SSN formatted with spaces",
-            r"(?<![!@#$%&*()_+|`\\\/;\"'<>\?~A-Za-z0-9])(?:^|[=:\[\{\- ])\d{3} \d{2} \d{4}(?=$|[.\]\}, ])",
-            0.85,
-    ),
+            r"(?:^|[=:\[\{\-\s])\d{3} \d{2} \d{4}(?=$|[.\]\},\s])",
+            0.5,
+        ),
 
         Pattern(
             "SSN unformatted",
-            r"(?<![!@#$%&*()_+|`\\\/;\"'<>\?~A-Za-z0-9])(?:^|[=:\[\{\- ])\d{9}(?=$|[.\]\}, ])",
-            0.85,
-    ),
-
+            r"(?:^|[=:\[\{\-\s])\d{9}(?=$|[.\]\},\s])",
+            0.5,
+        ),
 
     ]
 
@@ -69,7 +68,7 @@ class SSN_Formatted_Unformatted_Recognizer(PatternRecognizer):
     def analyze(self, text: str, entities: List[str], nlp_artifacts: NlpArtifacts = None):
         # First get results from the parent class
         results = super().analyze(text, entities, nlp_artifacts)
-        
+
         if not results:
             return []
 
@@ -77,14 +76,14 @@ class SSN_Formatted_Unformatted_Recognizer(PatternRecognizer):
         enhanced_results = []
         for result in results:
             pattern_text = text[result.start:result.end]
-            
+
             # Validate the SSN
             validity = self.validate_ssn(pattern_text)
             has_context = self._has_context(text, result.start, result.end)
-            
+
             # Adjust score based on validation and context
             adjusted_score = self._calculate_adjusted_score(result.score, validity, has_context)
-            
+
             # Create enhanced result
             enhanced_result = RecognizerResult(
                 entity_type=result.entity_type,
@@ -109,7 +108,7 @@ class SSN_Formatted_Unformatted_Recognizer(PatternRecognizer):
         context_start = max(0, start - window_size)
         context_end = min(len(text), end + window_size)
         context_window = text[context_start:context_end].lower()
-        
+
         return any(context_word.lower() in context_window for context_word in self.CONTEXT)
 
     def validate_ssn(self, ssn: str) -> str:
@@ -150,21 +149,24 @@ class SSN_Formatted_Unformatted_Recognizer(PatternRecognizer):
 
         return "valid"
 
-    def _calculate_adjusted_score(self, original_score: float, validity: str, has_context: bool) -> float:
-        """Calculate adjusted score based on validation and context."""
+    def _calculate_adjusted_score(self, original_score: float,validity: str, has_context: bool) -> float:
+        """
+        Scoring rules:
+        - invalid            -> 0.1
+        - valid, no context  -> 0.5
+        - valid, with context-> 1.0
+        - suspicious         -> reduced confidence
+        """
+
         if validity == "invalid":
-            return 0.1  # Very low score for invalid SSNs
-        
-        base_score = original_score
-        
-        # Apply context boost
-        if has_context:
-            base_score = min(base_score + 0.3, 1.0)
-        
-        # Apply validation adjustments
+            return 0.1
+
         if validity == "suspicious":
-            base_score = base_score * 0.7  # Reduce score for suspicious SSNs
-        elif validity == "valid":
-            base_score = min(base_score + 0.1, 1.0)  # Slight boost for valid SSNs
-        
-        return max(0.0, min(1.0, base_score))  # Ensure score is between 0-1
+            # Suspicious but still detected
+            return 0.3 if not has_context else 0.6
+
+        # validity == "valid"
+        if has_context:
+            return 1.0
+
+        return 0.5

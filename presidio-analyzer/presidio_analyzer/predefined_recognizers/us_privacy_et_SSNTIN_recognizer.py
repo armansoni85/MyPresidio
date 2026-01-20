@@ -18,7 +18,7 @@ class SSNAndTINRecognizer(PatternRecognizer):
         # SSN formatted (not starting with 9)
         Pattern(
             name="SSN formatted",
-            regex=r"""(?<![!@#$%&*()_+|`\\\/;"'<>\?~A-Za-z0-9])(?:^|[=:\[\{\- ])\d{3}[- ]\d{2}[- ]\d{4}(?=$|[.\]\}, ])""",
+            regex=r"""(?:^|[=:\[\{\-\s])\d{3}[- ]\d{2}[- ]\d{4}(?=$|[.\]\},\s])""",
             score=0.5,
         ),
     ]
