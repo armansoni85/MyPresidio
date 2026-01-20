@@ -1,167 +1,78 @@
-import re
-from typing import Optional, List, Tuple
 from presidio_analyzer import Pattern, PatternRecognizer, RecognizerResult
+from typing import List
+import re
 
 
 class HICNRecognizer(PatternRecognizer):
-    """
-    Recognizes and validates both Health Insurance Claim Numbers (HICNs)
-    and Medicare Beneficiary Identifiers (MBIs).
 
-    Scoring rules:
-        1. keywords + incorrect ID → score < 0.7
-        2. no keywords + correct ID → score > 0.7
-        3. keywords + correct ID → score > 0.8 or 1.0
-    """
+    ENTITY_TYPE = "HICN"
 
-    # -------------------------------
-    # Regex Patterns
-    # -------------------------------
-    PATTERNS = [
-        # HICN legacy patterns (accepts hyphens/spaces)
-        Pattern(
-            "HICN (Legacy)",
-            r"\b\d{3}[- ]?\d{2}[- ]?\d{4}[A-Z0-9]{1,2}\b",
-            0.5,
-        ),
-        # MBI modern patterns (accepts hyphens/spaces)
-        Pattern(
-            "MBI (Modern)",
-            r"\b[1-9][A-CE-HJ-NP-RT-WY][0-9][A-CE-HJ-NP-RT-WY]{2}[0-9][A-CE-HJ-NP-RT-WY]{2}[0-9]{2}\b"
-            r"|\b[1-9][A-CE-HJ-NP-RT-WY][0-9][- ]?[A-CE-HJ-NP-RT-WY]{2}[- ]?[0-9][- ]?[A-CE-HJ-NP-RT-WY]{2}[- ]?[0-9]{2}\b",
-            0.5,
-        ),
-    ]
-
-    # Contextual keywords
-    CONTEXT = [
-        "medicare",
-        "medicaid",
-        "health insurance claim number",
+    HICN_KEYWORDS = {
         "hicn",
-        "mbi",
-        "cms",
-        "medicare beneficiary",
-        "social security",
+        "health insurance claim number",
+        "medicare hicn",
+        "medicare number"
+    }
+
+    PATTERNS = [
+        Pattern(
+            name="hicn_no_delimiter",
+            regex=r"\b[A-Z]{0,3}[0-9]{9}[0-9A-Z]{1,3}\b",
+            score=0.7
+        ),
+        Pattern(
+            name="hicn_space_delimited",
+            regex=r"\b[A-Z]{0,3}[0-9]{3} [0-9]{6}[0-9A-Z]{1,3}\b",
+            score=0.7
+        ),
+        Pattern(
+            name="hicn_space_hyphen_delimited",
+            regex=r"\b[A-Z]{0,3}-[0-9]{3} [0-9]{2}-[0-9]{4}-[0-9A-Z]{1,3}\b",
+            score=0.7
+        ),
+        Pattern(
+            name="hicn_hyphen_delimited",
+            regex=r"\b[A-Z]{0,3}-[0-9]{3}-[0-9]{2}-[0-9]{4}-[0-9A-Z]{1,3}\b",
+            score=0.7
+        ),
     ]
 
-    def __init__(
-        self,
-        patterns: Optional[List[Pattern]] = None,
-        context: Optional[List[str]] = None,
-        supported_language: str = "en",
-        supported_entity: str = "HICN",
-        replacement_pairs: Optional[List[Tuple[str, str]]] = None,
-    ):
-        patterns = patterns if patterns else self.PATTERNS
-        context = context if context else self.CONTEXT
+    def __init__(self, supported_language: str = "en"):
         super().__init__(
-            supported_entity=supported_entity,
-            patterns=patterns,
-            context=context,
-            supported_language=supported_language,
+            supported_entity=self.ENTITY_TYPE,
+            patterns=self.PATTERNS,
+            supported_language=supported_language
         )
 
-    # -------------------------------
-    # Add safe context checker
-    # -------------------------------
-    def _has_context(self, text: str, result: RecognizerResult) -> bool:
-        """
-        Detect whether any of the recognizer's context keywords appear
-        within 100 characters before or after the match.
-        """
-        window = 100
-        start = max(0, result.start - window)
-        end = min(len(text), result.end + window)
-        segment = text[start:end].lower()
-
-        for kw in self.CONTEXT:
-            if kw.lower() in segment:
+    def _is_inside_url(self, text: str, start: int, end: int) -> bool:
+        for match in re.finditer(r"https?://\S+", text):
+            if start >= match.start() and end <= match.end():
                 return True
         return False
 
-    # -------------------------------
-    # Validation Functions
-    # -------------------------------
-    def _is_valid_hicn(self, hicn: str) -> bool:
-        """Check structural and basic integrity for legacy HICNs."""
-        hicn = hicn.replace("-", "").replace(" ", "").upper()
-        if not re.fullmatch(r"\d{9}[A-Z0-9]{1,2}", hicn):
-            return False
+    def _keyword_nearby(self, text: str, start: int, window: int = 50) -> bool:
+        context = text.lower()[max(0, start - window): start + window]
+        return any(keyword in context for keyword in self.HICN_KEYWORDS)
 
-        ssn = hicn[:9]
-        # SSN validity checks
-        if ssn.startswith(("000", "666")) or ssn[0] == "9":
-            return False
-        if ssn[3:5] == "00" or ssn[5:] == "0000":
-            return False
-        return True
+    def analyze(self, text: str, entities: List[str], nlp_artifacts=None):
+        results = []
 
-    def _is_valid_mbi(self, mbi: str) -> bool:
-        """Validate MBI format per CMS rules."""
-        mbi = mbi.replace("-", "").replace(" ", "").upper()
-        if len(mbi) != 11:
-            return False
+        for pattern in self.patterns:
+            for match in re.finditer(pattern.regex, text):
+                start, end = match.start(), match.end()
 
-        if any(ch in "IOSLBZ" for ch in mbi):
-            return False
+                if self._is_inside_url(text, start, end):
+                    continue
 
-        pattern = re.compile(
-            r"^[1-9][A-CE-HJ-NP-RT-WY][0-9][A-CE-HJ-NP-RT-WY]{2}"
-            r"[0-9][A-CE-HJ-NP-RT-WY]{2}[0-9]{2}$"
-        )
-        if not pattern.match(mbi):
-            return False
+                score = 1.0 if self._keyword_nearby(text, start) else 0.7
 
-        # Basic checksum-like integrity check
-        digits = [int(d) for d in mbi if d.isdigit()]
-        if not digits or sum(digits) % 10 == 0:
-            return False
+                results.append(
+                    RecognizerResult(
+                        entity_type=self.ENTITY_TYPE,
+                        start=start,
+                        end=end,
+                        score=score
+                    )
+                )
 
-        return True
-
-    # -------------------------------
-    # Scoring Logic
-    # -------------------------------
-    def _compute_score(self, has_context: bool, valid: bool) -> float:
-        """Apply custom scoring rules."""
-        if has_context and not valid:
-            return 0.5  # Case 1
-        elif not has_context and valid:
-            return 0.8  # Case 2
-        elif has_context and valid:
-            return 1.0  # Case 3
-        else:
-            return 0.4  # fallback
-
-    # -------------------------------
-    # Override analyze()
-    # -------------------------------
-    def analyze(
-        self,
-        text: str,
-        entities: Optional[List[str]] = None,
-        nlp_artifacts=None,
-    ) -> List[RecognizerResult]:
-        base_results = super().analyze(text, entities, nlp_artifacts)
-        validated_results = []
-
-        for result in base_results:
-            value = text[result.start:result.end].strip()
-            norm_val = value.replace("-", "").replace(" ", "").upper()
-
-            # Determine type (HICN vs MBI)
-            if re.fullmatch(r"\d{9}[A-Z0-9]{1,2}", norm_val):
-                valid = self._is_valid_hicn(value)
-            else:
-                valid = self._is_valid_mbi(value)
-
-            # Safe context detection
-            context_found = self._has_context(text, result)
-
-            # Compute score
-            result.score = self._compute_score(context_found, valid)
-            validated_results.append(result)
-
-        return validated_results
-
+        return results

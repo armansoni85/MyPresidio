@@ -1,116 +1,124 @@
 import re
+from typing import Optional, Dict, List
 from presidio_analyzer import Pattern, PatternRecognizer, RecognizerResult
-from typing import List, Optional, Dict
+
 
 class CreditCardIssuerRecognizer(PatternRecognizer):
-    """
-    Recognizes credit card numbers from all major issuers with proper validation.
-    Supported issuers: Visa, MasterCard, American Express, Diners Club, Discover, JCB, China UnionPay.
-    """
 
-    # Credit card issuer rules: (name, validation function)
-    CREDIT_CARD_ISSUER_RULES = [
-        ("Visa", lambda x: x.startswith('4')),
-        ("MasterCard", lambda x: 
-            (len(x) >= 2 and x[0] == '5' and x[1] in '12345') or  # 51-55
-            (len(x) >= 4 and 2221 <= int(x[:4]) <= 2720)          # 2221-2720 (new range)
-        ),
-        ("American Express", lambda x: len(x) >= 2 and x[:2] in ['34','37']),
-        ("Diners Club", lambda x: 
-            x.startswith(('300','301','302','303','304','305','309','36','38','39'))
-        ),
-        ("Discover", lambda x: 
-            (x.startswith('6011')) or
-            (len(x) >= 6 and 622126 <= int(x[:6]) <= 622925) or  # China UnionPay co-branded
-            (len(x) >= 3 and x.startswith('64') and x[2] in '456789') or  # 644-649
-            (len(x) >= 2 and x.startswith('65'))),
-        ("JCB", lambda x: 
-            (x.startswith('2131')) or
-            (x.startswith('1800')) or
-            (len(x) >= 4 and x.startswith('35') and 3528 <= int(x[:4]) <= 3589)),
-        ("China UnionPay", lambda x: 
-            x.startswith('62') or  # Standard UnionPay
-            (len(x) >= 6 and 810000 <= int(x[:6]) <= 817199)  # Co-branded cards
-        )
+    CONTEXT_TERMS = [
+        "ccn", "issuer", "credit", "card", "debit", "visa", "mastercard",
+        "amex", "american express", "discover", "jcb",
+        "diners", "maestro", "unionpay",
+        "card number", "card no", "cc#", "cvv", "cvc", "expiry", "expiration"
     ]
 
-    # Valid lengths per issuer
-    CREDIT_CARD_LENGTHS: Dict[str, List[int]] = {
-        "Visa": [13, 16, 19],
-        "MasterCard": [16],
-        "American Express": [15],
-        "Diners Club": [14, 15, 16, 17, 18, 19],
-        "Discover": [16, 17, 18, 19],
-        "JCB": [15, 16, 17, 18, 19],
-        "China UnionPay": [16, 17, 18, 19]
+    TEST_CARDS = {
+        "4111111111111111",
+        "4012888888881881",
+        "5555555555554444",
+        "378282246310005",
+        "371449635398431",
+        "6011111111111117"
     }
 
-    CONTEXT_TERMS: List[str] = [
-        "credit", "card", "cc", "debit", "visa", "mastercard", "amex",
-        "discover", "jcb", "unionpay", "cup", "card number", "card no",
-        "cc#", "cardholder", "expiration", "expiry", "cvv", "cvc"
+    # It's issuer list 
+    credit_card_issuers = [
+        {"name": "American Express", "starts_with": ["34", "37"]},
+        {"name": "Discover", "starts_with": ["6011", "622", "64", "65"]},
+        {"name": "JCB", "starts_with": ["35"]},
+        {"name": "Mastercard", "starts_with": ["51", "52", "53", "54", "55", "22", "27"]},
+        {"name": "Visa", "starts_with": ["4"]},
+        {"name": "China UnionPay", "starts_with": ["62"]},
+        {"name": "Diners Club - Carte Blanche", "starts_with": ["300", "301", "302", "303", "304", "305"]},
+        {"name": "Maestro", "starts_with": ["5018", "5020", "5038", "5893", "6304", "6759", "6761", "6762", "6763"]}
     ]
 
     def __init__(self, supported_language: Optional[str] = None):
-        # Match numbers with spaces/hyphens between digits
-        patterns = [Pattern("Credit Card", r'\b(?:\d[ -]*?){13,19}\b', 0.85)]
+        patterns = [
+            Pattern("FORMATTED_CC", r'\b\d{4}(?:[ -]\d{4}){2,4}\b', 0.01),
+            Pattern("UNFORMATTED_CC", r'\b\d{13,19}\b', 0.01),
+        ]
         super().__init__(
             supported_entity="CREDIT_CARD_ISSUER",
             patterns=patterns,
             supported_language=supported_language,
-            context=self.CONTEXT_TERMS
+            context=[]
         )
 
-    def luhn_checksum(self, card_number: str) -> bool:
-        """Validate credit card number using Luhn algorithm."""
-        def digits_of(n):
-            return [int(d) for d in str(n)]
-        
-        digits = digits_of(card_number)
-        odd_digits = digits[-1::-2]
-        even_digits = digits[-2::-2]
-        checksum = sum(odd_digits)
-        for d in even_digits:
-            checksum += sum(digits_of(d * 2))
+    # ---------------- helpers ----------------
+
+    def luhn_checksum(self, number: str) -> bool:
+        digits = [int(d) for d in number]
+        checksum = 0
+        parity = len(digits) % 2
+        for i, d in enumerate(digits):
+            if i % 2 == parity:
+                d *= 2
+                if d > 9:
+                    d -= 9
+            checksum += d
         return checksum % 10 == 0
 
-    def determine_issuer(self, card_number: str) -> Optional[str]:
-        """Determine issuer based on card number prefix."""
-        for issuer, rule in self.CREDIT_CARD_ISSUER_RULES:
-            try:
-                if rule(card_number):
-                    return issuer
-            except (ValueError, IndexError):
-                continue
+    def determine_issuer(self, number: str) -> Optional[str]:
+        for issuer in self.credit_card_issuers:
+            for prefix in issuer["starts_with"]:
+                if number.startswith(prefix):
+                    return issuer["name"]
         return None
 
+    def is_test_card(self, number: str) -> bool:
+        return number in self.TEST_CARDS or len(set(number)) == 1
+
+    def has_context(self, text: str, start: int, end: int) -> bool:
+        window = text[max(0, start - 50): min(len(text), end + 50)].lower()
+        for term in self.CONTEXT_TERMS:
+            if re.search(rf"\b{re.escape(term)}\b", window):
+                return True
+        return False
+
+    # ---------------- analyze ----------------
+
     def analyze(self, text, entities, nlp_artifacts=None):
-        results = super().analyze(text, entities, nlp_artifacts)
-        valid_results = []
 
-        for result in results:
-            # Extract matched text and remove non-digit characters
-            matched_text = text[result.start:result.end]
-            card_number = re.sub(r"\D", "", matched_text)
-            length = len(card_number)
+        raw_results = super().analyze(text, entities, nlp_artifacts)
+        hits: Dict[str, RecognizerResult] = {}
+        meta: Dict[str, Dict] = {}
 
-            # Skip if not within valid length range
-            if not (13 <= length <= 19):
+        for r in raw_results:
+            raw = text[r.start:r.end]
+            digits = re.sub(r"\D", "", raw)
+
+            if not (13 <= len(digits) <= 19):
+                continue
+            if not self.luhn_checksum(digits):
+                continue
+            if self.is_test_card(digits):
                 continue
 
-            # Determine issuer and validate length
-            issuer = self.determine_issuer(card_number)
+            issuer = self.determine_issuer(digits)
             if issuer is None:
                 continue
-            if length not in self.CREDIT_CARD_LENGTHS.get(issuer, []):
-                continue
 
-            # Validate with Luhn algorithm (except China UnionPay)
-            if issuer != "China UnionPay" and not self.luhn_checksum(card_number):
-                continue
+            hits[digits] = r
+            meta[digits] = {
+                "digits": digits,
+                "issuer": issuer,
+                "formatted": bool(re.search(r"[ -]", raw)),
+                "context": self.has_context(text, r.start, r.end)
+            }
 
-            # Add issuer to metadata and keep result
-            result.metadata = {"issuer": issuer}
-            valid_results.append(result)
+        multiple = len(meta) > 1
+        results = []
 
-        return valid_results
+        for digits, r in hits.items():
+            m = meta[digits]
+
+            score = 0.75 if multiple else (0.6 if m["formatted"] else 0.4)
+            if m["context"]:
+                score += 0.5
+
+            r.score = min(score, 1.25)
+            r.metadata = m
+            results.append(r)
+
+        return results
