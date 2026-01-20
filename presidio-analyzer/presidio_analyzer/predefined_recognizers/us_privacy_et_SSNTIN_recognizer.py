@@ -43,6 +43,8 @@ class SSNAndTINRecognizer(PatternRecognizer):
         "social security number",
         "social security numbers",
         "tax id",
+        "taxpayer id",
+        "social security",
         "taxpayer identification number",
     ]
 
