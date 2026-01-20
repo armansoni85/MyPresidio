@@ -18,9 +18,25 @@ class SSN_Formatted_Unformatted_Recognizer(PatternRecognizer):
     """
 
     PATTERNS = [
-        Pattern("SSN formatted with hyphen", r"\b\d{3}-\d{2}-\d{4}\b", 0.85),
-        Pattern("SSN formatted with spaces", r"\b\d{3} \d{2} \d{4}\b", 0.85),
-        Pattern("SSN unformatted", r"\b\d{9}\b", 0.85),
+        Pattern(
+            "SSN formatted with hyphen",
+            r"(?<![!@#$%&*()_+|`\\\/;\"'<>\?~A-Za-z0-9])(?:^|[=:\[\{\- ])\d{3}-\d{2}-\d{4}(?=$|[.\]\}, ])",
+            0.85,
+    ),
+
+        Pattern(
+            "SSN formatted with spaces",
+            r"(?<![!@#$%&*()_+|`\\\/;\"'<>\?~A-Za-z0-9])(?:^|[=:\[\{\- ])\d{3} \d{2} \d{4}(?=$|[.\]\}, ])",
+            0.85,
+    ),
+
+        Pattern(
+            "SSN unformatted",
+            r"(?<![!@#$%&*()_+|`\\\/;\"'<>\?~A-Za-z0-9])(?:^|[=:\[\{\- ])\d{9}(?=$|[.\]\}, ])",
+            0.85,
+    ),
+
+
     ]
 
     CONTEXT = [
